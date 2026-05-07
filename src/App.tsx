@@ -239,12 +239,18 @@ const StatusProgressTracker = ({ reportId }: { reportId: string }) => {
             <div className="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-white border-2 border-unsri-gold shadow-sm group-hover:scale-125 transition-transform" />
             <div className="bg-slate-50/50 p-5 rounded-3xl border border-slate-100 group-hover:bg-white group-hover:shadow-xl group-hover:shadow-slate-200/50 transition-all">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{log.previous_status}</span>
-                  <ChevronRight size={12} className="text-slate-300" />
-                  <span className="text-[10px] font-black text-unsri-black uppercase tracking-widest bg-unsri-gold/20 px-2 py-0.5 rounded-lg">{log.new_status}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {log.action === 'UPDATE_STATUS' || log.action === 'ASSIGN_SATGAS' ? (
+                    <>
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{log.previous_status || 'START'}</span>
+                      <ChevronRight size={12} className="text-slate-300" />
+                      <span className="text-[10px] font-black text-unsri-black uppercase tracking-widest bg-unsri-gold/20 px-2 py-0.5 rounded-lg">{log.new_status || log.action}</span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] font-black text-unsri-black uppercase tracking-widest bg-blue-100 text-blue-600 px-2 py-0.5 rounded-lg">{log.action}</span>
+                  )}
                 </div>
-                <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded-lg border border-slate-100 shadow-sm">
+                <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded-lg border border-slate-100 shadow-sm shrink-0">
                   {new Date(log.created_at).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
                 </span>
               </div>
@@ -281,6 +287,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [exportModal, setExportModal] = useState<{ isOpen: boolean, reportId: string, zipPassword?: string, downloadUrl?: string }>({ isOpen: false, reportId: '' });
+  const [logModal, setLogModal] = useState<{ isOpen: boolean, reportId: string }>({ isOpen: false, reportId: '' });
   const [userModal, setUserModal] = useState<{ isOpen: boolean, user?: UserData }>({ isOpen: false });
   const [statusModal, setStatusModal] = useState<{ isOpen: boolean, reportId: string, nextStatus: Status | null }>({ isOpen: false, reportId: '', nextStatus: null });
   const [assignModal, setAssignModal] = useState<{ isOpen: boolean, reportId: string }>({ isOpen: false, reportId: '' });
@@ -557,8 +564,12 @@ export default function App() {
             className="flex items-center gap-3 cursor-pointer group"
             onClick={() => setView('landing')}
           >
-            <div className="w-12 h-12 bg-unsri-gold rounded-2xl flex items-center justify-center shadow-unsri-gold/30 shadow-xl group-hover:rotate-6 transition-all duration-300 overflow-hidden border-2 border-unsri-black/5">
-              <Shield size={24} className="text-unsri-black" />
+            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-unsri-gold/30 shadow-xl group-hover:rotate-6 transition-all duration-300 overflow-hidden border-2 border-unsri-black/5 p-1">
+              <img 
+                src="https://upload.wikimedia.org/wikipedia/id/0/00/Lambang_Universitas_Sriwijaya.svg" 
+                alt="Logo UNSRI" 
+                className="w-full h-full object-contain"
+              />
             </div>
             <div className="hidden sm:block">
               <h1 className="font-black text-xl leading-tight text-unsri-black tracking-tighter">PPKPT <span className="text-unsri-gold bg-unsri-black px-1.5 rounded">FASILKOM</span></h1>
@@ -675,7 +686,7 @@ export default function App() {
                     <div className="relative z-10 bg-white p-4 rounded-[40px] shadow-2xl border border-slate-200 rotate-3 hover:rotate-0 transition-transform duration-500">
                       <img 
                         src="/gedung-fasilkom.jpg" 
-                        alt="Fasilkom UNSRI" 
+                        alt="Fasilkom UNSRI (Ilustrasi)" 
                         className="rounded-[32px] w-full h-[600px] object-cover"
                         referrerPolicy="no-referrer"
                       />
@@ -1381,8 +1392,12 @@ export default function App() {
                                           >
                                             <Users size={18} />
                                           </button>
-                                          <button className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-slate-200 hover:text-slate-900 transition-all">
-                                            <ChevronRight size={18} />
+                                          <button 
+                                            onClick={() => setLogModal({ isOpen: true, reportId: report.id })}
+                                            className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-unsri-gold hover:text-unsri-black transition-all"
+                                            title="Lihat Riwayat & Log"
+                                          >
+                                            <Clock size={18} />
                                           </button>
                                         </>
                                       ) : (
@@ -1423,8 +1438,12 @@ export default function App() {
                                               <Database size={18} />
                                             </button>
                                           )}
-                                          <button className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-slate-200 hover:text-slate-900 transition-all">
-                                            <ChevronRight size={18} />
+                                          <button 
+                                            onClick={() => setLogModal({ isOpen: true, reportId: report.id })}
+                                            className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-unsri-gold hover:text-unsri-black transition-all"
+                                            title="Lihat Riwayat & Log"
+                                          >
+                                            <Clock size={18} />
                                           </button>
                                         </>
                                       )}
@@ -1509,6 +1528,34 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
+
+      {/* Log Modal */}
+      <AnimatePresence>
+        {logModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] p-8 max-w-2xl w-full shadow-2xl relative border border-slate-200 max-h-[90vh] overflow-y-auto"
+            >
+              <button 
+                onClick={() => setLogModal({ isOpen: false, reportId: '' })}
+                className="absolute top-6 right-6 w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-200 hover:text-slate-900 transition-colors"
+              >
+                <X size={16} />
+              </button>
+              
+              <div className="mb-6">
+                <h3 className="text-2xl font-black text-unsri-black tracking-tight">Riwayat & Log Sistem</h3>
+                <p className="text-sm text-slate-500 font-medium">Log aktivitas komprehensif, termasuk riwayat ekspor dan status.</p>
+              </div>
+
+              <StatusProgressTracker reportId={logModal.reportId} />
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Export Modal */}
       <AnimatePresence>
