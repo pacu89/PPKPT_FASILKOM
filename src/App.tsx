@@ -25,20 +25,43 @@ import {
   X,
   Database,
   Fingerprint,
-  Briefcase
+  Briefcase,
+  List,
+  Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function getWorkingDays(startDateStr: string, endDateStr: string = new Date().toISOString()) {
+  const startDate = new Date(startDateStr);
+  const endDate = new Date(endDateStr);
+  let count = 0;
+  let current = new Date(startDate);
+  // Setting the time to midnight for accurate day counting
+  current.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+  
+  while (current <= end) {
+      let dayOfWeek = current.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          count++;
+      }
+      current.setDate(current.getDate() + 1);
+  }
+  return Math.max(0, count - 1); // subtract 1 so day 0 is the start day itself
+}
+
 // --- Types ---
 type View = 'landing' | 'report' | 'track' | 'admin-login' | 'admin-dashboard';
-type AdminTab = 'reports' | 'users';
-type Status = 'PENDING' | 'INVESTIGATING' | 'RESOLVED' | 'REJECTED';
+type AdminTab = 'reports' | 'users' | 'settings_sla' | 'settings_upload' | 'settings_category';
+type Status = 'PENDING' | 'INVESTIGATING' | 'RECOMMENDED' | 'RESOLVED' | 'OUT_OF_SCOPE';
 
 interface UserData {
   id: string;
@@ -61,6 +84,7 @@ interface Report {
   evidence_url: string | null;
   status: Status;
   created_at: string;
+  last_updated_at: string;
   assigned_to: string | null;
 }
 
@@ -75,16 +99,6 @@ interface AuditLog {
   created_at: string;
   officer_name: string;
 }
-
-const VIOLENCE_CATEGORIES = [
-  'Kekerasan Fisik',
-  'Kekerasan Psikis',
-  'Kekerasan Seksual',
-  'Pelecehan Seksual',
-  'Perundungan (Bullying)',
-  'Diskriminasi',
-  'Lainnya'
-];
 
 // --- Components ---
 
@@ -183,6 +197,25 @@ const Select = ({ label, options, error, ...props }: React.SelectHTMLAttributes<
   </div>
 );
 
+const RichTextEditor = ({ label, value, onChange, error, className }: { label: string; value: string; onChange: (val: string) => void; error?: string; className?: string }) => (
+  <div className="space-y-2 w-full">
+    <div className="flex items-center justify-between px-1">
+      <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+        {label}
+      </label>
+    </div>
+    <div className={cn("bg-white border-2 rounded-2xl overflow-hidden focus-within:border-unsri-gold focus-within:ring-4 focus-within:ring-unsri-gold/10 transition-all", error ? "border-red-500" : "border-slate-100", className)}>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full min-h-[200px] p-6 bg-transparent outline-none resize-y text-sm font-medium"
+        placeholder="Tuliskan catatan di sini..."
+      />
+    </div>
+    {error && <p className="text-xs text-red-500 font-bold ml-1">{error}</p>}
+  </div>
+);
+
 const FileInput = ({ label, helperText, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string; helperText?: string }) => (
   <div className="space-y-1.5 w-full">
     <label className="text-sm font-semibold text-gray-700 ml-1">{label}</label>
@@ -212,7 +245,8 @@ const StatusProgressTracker = ({ reportId }: { reportId: string }) => {
       try {
         const res = await fetch(`/api/admin/reports/${reportId}/logs`);
         const data = await res.json();
-        setLogs(data);
+        // Filter out EXPORT_ZIP from timeline just in case it exists in legacy data
+        setLogs(data.filter((l: any) => l.action !== 'EXPORT_ZIP'));
       } catch (err) {
         console.error(err);
       } finally {
@@ -254,7 +288,10 @@ const StatusProgressTracker = ({ reportId }: { reportId: string }) => {
                   {new Date(log.created_at).toLocaleString('id-ID', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
                 </span>
               </div>
-              <p className="text-sm text-slate-600 font-medium leading-relaxed italic">"{log.catatan_petugas}"</p>
+              <div 
+                className="text-sm text-slate-600 font-medium leading-relaxed italic quill-content" 
+                dangerouslySetInnerHTML={{ __html: log.catatan_petugas }} 
+              />
               <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2">
                 <div className="w-6 h-6 bg-unsri-navy rounded-lg flex items-center justify-center text-unsri-gold text-[10px] font-black">
                   {log.officer_name[0].toUpperCase()}
@@ -274,6 +311,43 @@ const StatusProgressTracker = ({ reportId }: { reportId: string }) => {
   );
 };
 
+const MaskedContact = ({ contact }: { contact: string | null }) => {
+  const [revealed, setRevealed] = useState(false);
+  
+  if (!contact) return <span className="text-xs text-slate-400 italic">Kontak tidak tersedia</span>;
+  
+  // Format mask
+  const masked = contact.replace(/(\d{4})(\d{3,4})(\d+)?/, '$1-****-****').slice(0, 14); // generic simple mask
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <span className="text-[11px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded flex items-center gap-1.5 border border-slate-200">
+        <Phone size={10} />
+        {revealed ? contact : masked}
+      </span>
+      <button 
+        onClick={(e) => { e.stopPropagation(); setRevealed(!revealed); }}
+        className="text-xs text-unsri-gold hover:text-unsri-navy transition-colors p-1"
+        title={revealed ? "Sembunyikan" : "Tampilkan"}
+      >
+        {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+      {revealed && (
+        <a 
+          href={`https://wa.me/${contact.replace(/\D/g, '')}`} 
+          target="_blank" 
+          rel="noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[10px] bg-green-50 text-green-600 border border-green-200 px-2 py-0.5 rounded font-bold hover:bg-green-100 transition-colors"
+          title="Hubungi via WhatsApp"
+        >
+          WhatsApp
+        </a>
+      )}
+    </div>
+  );
+};
+
 // --- Main App ---
 
 export default function App() {
@@ -283,14 +357,37 @@ export default function App() {
   const [adminUser, setAdminUser] = useState<any>(null);
   const [reports, setReports] = useState<Report[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
+  const [settings, setSettings] = useState({ sla_pending: 7, sla_investigating: 30, sla_recommended: 7, sla_resolved: 7 });
   const [adminTab, setAdminTab] = useState<AdminTab>('reports');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [successPopup, setSuccessPopup] = useState<{ isOpen: boolean, trackingCode: string }>({ isOpen: false, trackingCode: '' });
   const [exportModal, setExportModal] = useState<{ isOpen: boolean, reportId: string, zipPassword?: string, downloadUrl?: string }>({ isOpen: false, reportId: '' });
   const [logModal, setLogModal] = useState<{ isOpen: boolean, reportId: string }>({ isOpen: false, reportId: '' });
   const [userModal, setUserModal] = useState<{ isOpen: boolean, user?: UserData }>({ isOpen: false });
-  const [statusModal, setStatusModal] = useState<{ isOpen: boolean, reportId: string, nextStatus: Status | null }>({ isOpen: false, reportId: '', nextStatus: null });
+  const [statusModal, setStatusModal] = useState<{ isOpen: boolean, reportId: string, nextStatus: Status | null, notes: string }>({ isOpen: false, reportId: '', nextStatus: null, notes: '' });
   const [assignModal, setAssignModal] = useState<{ isOpen: boolean, reportId: string }>({ isOpen: false, reportId: '' });
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  // Generate notifications
+  const userNotifications = adminUser ? reports.filter(r => r.assigned_to === adminUser.id && (r.status === 'PENDING' || r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED')).map(report => {
+    const slaSettings: Record<string, number> = {
+      PENDING: settings.sla_pending || 7,
+      INVESTIGATING: settings.sla_investigating || 30,
+      RECOMMENDED: settings.sla_recommended || 7
+    };
+    const limit = slaSettings[report.status];
+    const daysPassed = getWorkingDays(report.last_updated_at || report.created_at);
+    
+    if (daysPassed > limit) {
+      return { id: report.id, type: 'danger', message: `SLA Terlewati: Kasus ${report.tracking_code} telat ${daysPassed - limit} hari.` };
+    } else if (daysPassed >= limit - 2) {
+      return { id: report.id, type: 'warning', message: `Peringatan SLA: Kasus ${report.tracking_code} tersisa ${limit - daysPassed} hari kerja.` };
+    } else if (daysPassed === 0) {
+      return { id: report.id, type: 'info', message: `Baru Ditugaskan: Kasus ${report.tracking_code} menanti untuk diproses.` };
+    }
+    return null;
+  }).filter(Boolean) as { id: string, type: 'danger'|'warning'|'info'; message: string }[] : [];
 
   // Form State
   const [formData, setFormData] = useState({
@@ -336,7 +433,7 @@ export default function App() {
 
       const result = await res.json();
       if (result.success) {
-        setMessage({ type: 'success', text: `Laporan berhasil dikirim! Kode Tracking: ${result.tracking_code}` });
+        setSuccessPopup({ isOpen: true, trackingCode: result.tracking_code });
         setFormData({
           reporter_name: '',
           reporter_contact: '',
@@ -349,6 +446,7 @@ export default function App() {
           chronology: '',
           evidence: null
         });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Gagal mengirim laporan. Silakan coba lagi.' });
@@ -377,6 +475,20 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      const data = await res.json();
+      setSettings(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
@@ -397,6 +509,7 @@ export default function App() {
         setView('admin-dashboard');
         loadReports(data);
         loadUsers();
+        loadSettings();
       }
     } catch (err) {
       setMessage({ type: 'error', text: 'Login gagal.' });
@@ -494,25 +607,24 @@ export default function App() {
   const handleStatusUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
-    const notes = (form.elements.namedItem('status_notes') as HTMLTextAreaElement).value;
     
     if (!statusModal.nextStatus) return;
+
+    const formData = new FormData(form);
+    formData.append('status', statusModal.nextStatus);
+    formData.append('user_id_satgas', adminUser.id);
+    formData.append('catatan_petugas', statusModal.notes);
 
     try {
       const res = await fetch(`/api/admin/reports/${statusModal.reportId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          status: statusModal.nextStatus, 
-          user_id_satgas: adminUser.id, 
-          catatan_petugas: notes 
-        })
+        body: formData
       });
       const data = await res.json();
       if (data.error) {
         alert(data.error);
       } else {
-        setStatusModal({ isOpen: false, reportId: '', nextStatus: null });
+        setStatusModal({ isOpen: false, reportId: '', nextStatus: null, notes: '' });
         loadReports();
       }
     } catch (err) {
@@ -549,8 +661,9 @@ export default function App() {
     switch (status) {
       case 'PENDING': return 'bg-amber-50 text-amber-600 border-amber-200 shadow-sm shadow-amber-500/5';
       case 'INVESTIGATING': return 'bg-blue-50 text-blue-600 border-blue-200 shadow-sm shadow-blue-500/5';
+      case 'RECOMMENDED': return 'bg-indigo-50 text-indigo-600 border-indigo-200 shadow-sm shadow-indigo-500/5';
       case 'RESOLVED': return 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm shadow-emerald-500/5';
-      case 'REJECTED': return 'bg-red-50 text-red-600 border-red-200 shadow-sm shadow-red-500/5';
+      case 'OUT_OF_SCOPE': return 'bg-red-50 text-red-600 border-red-200 shadow-sm shadow-red-500/5';
       default: return 'bg-slate-50 text-slate-600 border-slate-200';
     }
   };
@@ -564,9 +677,9 @@ export default function App() {
             className="flex items-center gap-3 cursor-pointer group"
             onClick={() => setView('landing')}
           >
-            <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-unsri-gold/30 shadow-xl group-hover:rotate-6 transition-all duration-300 overflow-hidden border-2 border-unsri-black/5 p-1">
+            <div className="w-12 h-12">
               <img 
-                src="https://upload.wikimedia.org/wikipedia/id/0/00/Lambang_Universitas_Sriwijaya.svg" 
+                src="/unsri_icon.png" 
                 alt="Logo UNSRI" 
                 className="w-full h-full object-contain"
               />
@@ -605,6 +718,45 @@ export default function App() {
         "max-w-7xl mx-auto px-4 py-12",
         view === 'landing' ? "max-w-none px-0 py-0" : "max-w-4xl"
       )}>
+        <AnimatePresence>
+          {successPopup.isOpen && (
+            <motion.div
+              key="success-popup"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-unsri-black/60 backdrop-blur-sm"
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-white rounded-[40px] p-10 max-w-lg mx-auto w-full shadow-2xl space-y-8 border border-slate-200 text-center relative overflow-hidden"
+              >
+                <div className="absolute top-0 left-0 w-full h-2 bg-emerald-500" />
+                <div className="w-24 h-24 bg-emerald-100 rounded-full flex items-center justify-center mx-auto text-emerald-600 mb-6 shadow-inner">
+                  <CheckCircle2 size={48} />
+                </div>
+                <h3 className="text-3xl font-black text-unsri-black tracking-tight mt-6">Laporan Diterima</h3>
+                <p className="text-slate-500 font-medium">Laporan Anda telah berhasil kami terima dan akan segera diproses oleh Satgas. Harap simpan kode tracking berikut untuk memantau status laporan Anda.</p>
+                <div className="bg-slate-50 p-6 rounded-3xl border-2 border-dashed border-slate-300">
+                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Kode Tracking Anda</p>
+                   <p className="text-4xl font-black text-unsri-navy tracking-tight">{successPopup.trackingCode}</p>
+                </div>
+                <Button 
+                  onClick={() => {
+                    setSuccessPopup({ isOpen: false, trackingCode: '' });
+                    setView('landing');
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-600/20 py-4 text-lg"
+                >
+                  Selesai
+                </Button>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence mode="wait">
           {/* Landing View */}
           {view === 'landing' && (
@@ -643,7 +795,7 @@ export default function App() {
                     >
                       KEADILAN <br />
                       <span className="text-unsri-gold">TANPA</span> <br />
-                      <span className="bg-unsri-black text-white px-4 py-1 rounded-2xl inline-block mt-2">KETAKUTAN.</span>
+                      <span className="bg-unsri-black text-white px-4 py-1 rounded-2xl inline-block mt-2">KETAKUTAN</span>
                     </motion.h2>
 
                     <motion.p 
@@ -894,7 +1046,7 @@ export default function App() {
                   <div className="grid sm:grid-cols-2 gap-6">
                     <Select 
                       label="Kategori Kekerasan" 
-                      options={VIOLENCE_CATEGORIES.map(c => ({ value: c, label: c }))}
+                      options={(settings.categories || ['Kekerasan Seksual', 'Perundungan (Bullying)', 'Kekerasan Fisik', 'Kekerasan Psikis', 'Intoleransi', 'Pelecehan Seksual via Media Elektronik', 'Lainnya']).map((c: string) => ({ value: c, label: c }))}
                       value={formData.category}
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
                       required
@@ -1066,12 +1218,22 @@ export default function App() {
                           </div>
                         </div>
 
-                        {trackedReport.status !== 'PENDING' && (
+                        {(trackedReport.status === 'INVESTIGATING' || trackedReport.status === 'RECOMMENDED' || trackedReport.status === 'RESOLVED') && (
                           <div className="relative">
-                            <div className="absolute -left-[35px] top-1 w-6 h-6 rounded-full bg-unsri-navy border-4 border-white shadow-lg z-10" />
+                            <div className="absolute -left-[35px] top-1 w-6 h-6 rounded-full bg-blue-500 border-4 border-white shadow-lg z-10" />
                             <div className="space-y-2">
-                              <p className="text-lg font-black text-unsri-black">Dalam Investigasi</p>
-                              <p className="text-sm text-slate-500 leading-relaxed font-medium">Satgas sedang menelaah bukti-bukti dan melakukan koordinasi untuk menentukan langkah penanganan selanjutnya.</p>
+                              <p className="text-lg font-black text-unsri-black">Dalam Penanganan Secara Internal</p>
+                              <p className="text-sm text-slate-500 leading-relaxed font-medium">Satgas sedang menelaah bukti, mengumpulkan pihak terkait, dan menyusun laporan untuk penanganan selanjutnya.</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {(trackedReport.status === 'RECOMMENDED' || trackedReport.status === 'RESOLVED') && (
+                          <div className="relative">
+                            <div className="absolute -left-[35px] top-1 w-6 h-6 rounded-full bg-indigo-500 border-4 border-white shadow-lg z-10" />
+                            <div className="space-y-2">
+                              <p className="text-lg font-black text-unsri-black">Rekomendasi Sanksi Disusun</p>
+                              <p className="text-sm text-slate-500 leading-relaxed font-medium">Tim Satgas telah menyelesaikan investigasi dan memberikan rekomendasi sanksi kepada pihak universitas, menunggu penerbitan SK.</p>
                             </div>
                           </div>
                         )}
@@ -1079,9 +1241,31 @@ export default function App() {
                         {trackedReport.status === 'RESOLVED' && (
                           <div className="relative">
                             <div className="absolute -left-[35px] top-1 w-6 h-6 rounded-full bg-emerald-500 border-4 border-white shadow-lg z-10" />
-                            <div className="space-y-2">
-                              <p className="text-lg font-black text-unsri-black">Selesai Ditangani</p>
-                              <p className="text-sm text-slate-500 leading-relaxed font-medium">Penanganan laporan telah selesai dilakukan sesuai dengan prosedur dan regulasi yang berlaku di lingkungan UNSRI.</p>
+                            <div className="space-y-4">
+                              <div>
+                                <p className="text-lg font-black text-unsri-black">Selesai Ditangani</p>
+                                <p className="text-sm text-slate-500 leading-relaxed font-medium">Penanganan laporan telah selesai dilakukan dan SK Sanksi telah diterbitkan (jika ada sanksi yang dijatuhkan).</p>
+                              </div>
+                              
+                              {(trackedReport.nomor_sk_sanksi || trackedReport.tanggal_sk_sanksi) && (
+                                <div className="bg-slate-50 border border-slate-200 p-6 rounded-3xl space-y-4 shadow-sm">
+                                  <h5 className="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                                    <FileText size={14} className="text-unsri-gold" /> Keputusan Sanksi (SK)
+                                  </h5>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Nomor SK</p>
+                                      <p className="text-sm font-black text-unsri-black mt-1">{trackedReport.nomor_sk_sanksi || '-'}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tanggal SK</p>
+                                      <p className="text-sm font-black text-unsri-black mt-1">
+                                        {trackedReport.tanggal_sk_sanksi ? new Date(trackedReport.tanggal_sk_sanksi).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1200,10 +1384,40 @@ export default function App() {
                   )}
                   <div className="pt-6 mt-6 border-t border-white/10">
                     <p className="px-4 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">Sistem</p>
-                    <button className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-bold text-slate-400 hover:bg-white/5 hover:text-white transition-all">
-                      <Settings size={20} />
-                      <span>Pengaturan</span>
-                    </button>
+                    {adminUser?.role === 'admin' && (
+                      <>
+                        <button
+                          onClick={() => setAdminTab('settings_sla')}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-bold transition-all",
+                            adminTab === 'settings_sla' ? "bg-unsri-gold text-unsri-black shadow-xl shadow-unsri-gold/10" : "text-slate-400 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <Settings size={20} />
+                          <span>Pengaturan SLA</span>
+                        </button>
+                        <button
+                          onClick={() => setAdminTab('settings_upload')}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-bold transition-all",
+                            adminTab === 'settings_upload' ? "bg-unsri-gold text-unsri-black shadow-xl shadow-unsri-gold/10" : "text-slate-400 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <Database size={20} />
+                          <span>Maksimal Bukti</span>
+                        </button>
+                        <button
+                          onClick={() => setAdminTab('settings_category')}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-bold transition-all",
+                            adminTab === 'settings_category' ? "bg-unsri-gold text-unsri-black shadow-xl shadow-unsri-gold/10" : "text-slate-400 hover:bg-white/5 hover:text-white"
+                          )}
+                        >
+                          <List size={20} />
+                          <span>Kategori Kekerasan</span>
+                        </button>
+                      </>
+                    )}
                     <button 
                       onClick={() => { setAdminUser(null); setView('landing'); }}
                       className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-sm font-bold text-red-400 hover:bg-red-500/10 transition-all"
@@ -1233,64 +1447,142 @@ export default function App() {
                 <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-xl border-b border-slate-200 px-10 py-6 flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-black text-unsri-black">
-                      {adminTab === 'reports' ? 'Daftar Laporan Masuk' : 'Manajemen Anggota Satgas'}
+                      {adminTab === 'reports' ? 'Daftar Laporan Masuk' : adminTab === 'users' ? 'Manajemen Anggota Satgas' : adminTab === 'settings_sla' ? 'Pengaturan SLA Sistem' : adminTab === 'settings_upload' ? 'Pengaturan Maksimal Bukti' : 'Kategori Kekerasan'}
                     </h2>
                     <p className="text-sm text-slate-500 font-medium">Selamat datang kembali, {adminUser.username}.</p>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <button className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-all relative">
+                  <div className="flex items-center gap-4 relative">
+                    <button 
+                      onClick={() => setShowNotifications(!showNotifications)}
+                      className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-all relative"
+                    >
                       <Bell size={20} />
-                      <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
+                      {userNotifications.length > 0 && (
+                        <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white" />
+                      )}
                     </button>
+                    
+                    <AnimatePresence>
+                      {showNotifications && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 10 }}
+                          className="absolute top-14 right-0 w-80 bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden z-50 flex flex-col"
+                        >
+                          <div className="p-4 border-b border-slate-100 bg-slate-50 px-6">
+                            <h4 className="font-bold text-sm text-unsri-black">Notifikasi Anda</h4>
+                            <p className="text-[10px] text-slate-500 font-medium">{userNotifications.length} peringatan aktif</p>
+                          </div>
+                          <div className="max-h-80 overflow-y-auto">
+                            {userNotifications.length === 0 ? (
+                              <div className="p-6 text-center text-slate-400 text-sm font-medium">Belum ada notifikasi</div>
+                            ) : (
+                              <div className="divide-y divide-slate-100">
+                                {userNotifications.map((notif, idx) => (
+                                  <div key={idx} className={cn(
+                                    "p-4 px-6 text-xs font-medium cursor-pointer hover:bg-slate-50 transition-colors flex gap-3 items-start",
+                                    notif.type === 'danger' ? 'text-red-600 bg-red-50/30' : notif.type === 'warning' ? 'text-amber-600 bg-amber-50/30' : 'text-blue-600 bg-blue-50/30'
+                                  )}>
+                                    <div className="mt-0.5">
+                                      <AlertCircle size={14} />
+                                    </div>
+                                    <span className="flex-1 leading-relaxed">{notif.message}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     <div className="h-8 w-px bg-slate-200 mx-2" />
                     <div className="flex items-center gap-3 px-4 py-2 bg-slate-50 rounded-xl border border-slate-200">
                       <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                      <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">System Online</span>
+                      <span className="text-xs font-bold text-slate-600 uppercase tracking-widest hidden sm:inline-block">System Online</span>
                     </div>
                   </div>
                 </header>
 
                 <div className="p-10 space-y-10">
-                  {adminTab === 'reports' && (
+                  {adminTab === 'reports' && !statusModal.isOpen && (
                     <>
-                      {/* Metric Cards */}
-                      <div className="grid sm:grid-cols-4 gap-6">
-                        <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="w-12 h-12 bg-unsri-gold/10 rounded-2xl flex items-center justify-center text-unsri-black group-hover:bg-unsri-gold transition-colors">
-                              <FileText size={24} />
+                      {/* Metric Cards & Chart */}
+                      <div className="grid lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 grid sm:grid-cols-2 gap-6">
+                          <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="w-12 h-12 bg-unsri-gold/10 rounded-2xl flex items-center justify-center text-unsri-black group-hover:bg-unsri-gold transition-colors">
+                                <FileText size={24} />
+                              </div>
                             </div>
-                            <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">+12%</span>
+                            <p className="text-4xl font-black text-unsri-black">{reports.length}</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Total Laporan</p>
                           </div>
-                          <p className="text-4xl font-black text-unsri-black">{reports.length}</p>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Total Laporan</p>
+                          <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 group-hover:bg-amber-100 transition-colors">
+                                  <Clock size={24} />
+                                </div>
+                              </div>
+                            <p className="text-4xl font-black text-unsri-black">{reports.filter(r => r.status === 'PENDING').length}</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Menunggu Verifikasi</p>
+                          </div>
+                          <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-100 transition-colors">
+                                  <Activity size={24} />
+                                </div>
+                              </div>
+                            <p className="text-4xl font-black text-unsri-black">{reports.filter(r => r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED').length}</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Dalam Penanganan</p>
+                          </div>
+                          <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 group-hover:bg-emerald-100 transition-colors">
+                                  <CheckCircle2 size={24} />
+                                </div>
+                              </div>
+                            <p className="text-4xl font-black text-unsri-black">{reports.filter(r => r.status === 'RESOLVED').length}</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Selesai Ditangani</p>
+                          </div>
                         </div>
-                        <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-600 group-hover:bg-amber-100 transition-colors">
-                              <Clock size={24} />
-                            </div>
+
+                        <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all">
+                          <h4 className="text-sm font-black text-unsri-black mb-4 tracking-tighter">Status Penanganan</h4>
+                          <div className="h-[220px] w-full flex items-center justify-center">
+                            <PieChart width={250} height={220}>
+                              <Pie
+                                data={[
+                                  { name: 'Menunggu', value: reports.filter(r => r.status === 'PENDING').length, color: '#f59e0b' },
+                                  { name: 'Ditangani', value: reports.filter(r => r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED').length, color: '#3b82f6' },
+                                  { name: 'Selesai', value: reports.filter(r => r.status === 'RESOLVED').length, color: '#10b981' }
+                                ].filter(d => d.value > 0)}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={40}
+                                outerRadius={80}
+                                paddingAngle={5}
+                                dataKey="value"
+                                label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                                labelLine={false}
+                                fill="#8884d8"
+                              >
+                                {
+                                  [
+                                    { name: 'Menunggu', value: reports.filter(r => r.status === 'PENDING').length, color: '#f59e0b' },
+                                    { name: 'Ditangani', value: reports.filter(r => r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED').length, color: '#3b82f6' },
+                                    { name: 'Selesai', value: reports.filter(r => r.status === 'RESOLVED').length, color: '#10b981' }
+                                  ].filter(d => d.value > 0).map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                  ))
+                                }
+                              </Pie>
+                              <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                              <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                            </PieChart>
                           </div>
-                          <p className="text-4xl font-black text-unsri-black">{reports.filter(r => r.status === 'PENDING').length}</p>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Menunggu Verifikasi</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 group-hover:bg-blue-100 transition-colors">
-                              <Activity size={24} />
-                            </div>
-                          </div>
-                          <p className="text-4xl font-black text-unsri-black">{reports.filter(r => r.status === 'INVESTIGATING').length}</p>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Dalam Investigasi</p>
-                        </div>
-                        <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 group-hover:bg-emerald-100 transition-colors">
-                              <CheckCircle2 size={24} />
-                            </div>
-                          </div>
-                          <p className="text-4xl font-black text-unsri-black">{reports.filter(r => r.status === 'RESOLVED').length}</p>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Selesai Ditangani</p>
                         </div>
                       </div>
 
@@ -1345,14 +1637,17 @@ export default function App() {
                                   </td>
                                   <td className="px-8 py-6">
                                     <div className="space-y-1">
-                                      <p className="font-bold text-slate-900 flex items-center gap-2">
-                                        {report.is_anonymous ? (
-                                          <span className="flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                                            <EyeOff size={10} /> Anonim
-                                          </span>
-                                        ) : report.reporter_name}
-                                      </p>
-                                      <p className="text-xs text-slate-400 font-medium italic">Korban: {report.victim_name}</p>
+                                      <div className="font-bold text-slate-900 flex flex-col items-start gap-0.5">
+                                        <div className="flex items-center gap-2">
+                                          {report.is_anonymous ? (
+                                            <span className="flex items-center gap-1 text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                                              <EyeOff size={10} /> Anonim
+                                            </span>
+                                          ) : report.reporter_name}
+                                        </div>
+                                        <MaskedContact contact={report.reporter_contact} />
+                                      </div>
+                                      <p className="text-xs text-slate-400 font-medium italic mt-1">Korban: {report.victim_name}</p>
                                     </div>
                                   </td>
                                   <td className="px-8 py-6">
@@ -1380,6 +1675,32 @@ export default function App() {
                                   <td className="px-8 py-6">
                                     <p className="text-xs font-bold text-slate-600">{new Date(report.created_at).toLocaleDateString('id-ID')}</p>
                                     <p className="text-[10px] text-slate-400 font-medium">{new Date(report.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</p>
+                                    {(() => {
+                                      if (report.status === 'RESOLVED' || report.status === 'OUT_OF_SCOPE') return null;
+                                      
+                                      const slaSettings: Record<string, number> = {
+                                        PENDING: settings.sla_pending || 7,
+                                        INVESTIGATING: settings.sla_investigating || 30,
+                                        RECOMMENDED: settings.sla_recommended || 7
+                                      };
+                                      
+                                      const limit = slaSettings[report.status];
+                                      if (!limit) return null;
+                                      
+                                      const daysPassed = getWorkingDays(report.last_updated_at || report.created_at);
+                                      const late = daysPassed > limit;
+                                      const warning = daysPassed >= limit - 2 && !late;
+                                      
+                                      return (
+                                        <div className={cn(
+                                          "mt-2 inline-flex items-center gap-1 px-2 py-1 rounded border text-[9px] font-bold uppercase tracking-wider",
+                                          late ? "bg-red-50 text-red-600 border-red-200" : warning ? "bg-amber-50 text-amber-600 border-amber-200" : "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                        )}>
+                                          <AlertCircle size={10} />
+                                          {daysPassed}/{limit} Hari Kerja
+                                        </div>
+                                      );
+                                    })()}
                                   </td>
                                   <td className="px-8 py-6 text-right">
                                     <div className="flex items-center justify-end gap-2">
@@ -1403,31 +1724,40 @@ export default function App() {
                                       ) : (
                                         <>
                                           {report.assigned_to === adminUser?.id && report.status === 'PENDING' && (
-                                            <button 
-                                              onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'INVESTIGATING' })}
-                                              className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-unsri-gold hover:text-unsri-black transition-all"
-                                              title="Mulai Investigasi"
-                                            >
-                                              <Activity size={18} />
-                                            </button>
-                                          )}
-                                          {report.assigned_to === adminUser?.id && report.status === 'INVESTIGATING' && (
                                             <>
                                               <button 
-                                                onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'RESOLVED' })}
-                                                className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-emerald-500 hover:text-white transition-all"
-                                                title="Selesaikan Kasus"
+                                                onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'INVESTIGATING', notes: '' })}
+                                                className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-unsri-gold hover:text-unsri-black transition-all"
+                                                title="Teruskan ke Investigasi"
                                               >
-                                                <CheckCircle2 size={18} />
+                                                <Activity size={18} />
                                               </button>
                                               <button 
-                                                onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'REJECTED' })}
+                                                onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'OUT_OF_SCOPE', notes: '' })}
                                                 className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-red-500 hover:text-white transition-all"
-                                                title="Tolak Kasus"
+                                                title="Tutup Kasus (Tidak Masuk Lingkup)"
                                               >
                                                 <X size={18} />
                                               </button>
                                             </>
+                                          )}
+                                          {report.assigned_to === adminUser?.id && report.status === 'INVESTIGATING' && (
+                                            <button 
+                                                onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'RECOMMENDED', notes: '' })}
+                                                className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-indigo-500 hover:text-white transition-all"
+                                                title="Kumpulkan Hasil Investigasi"
+                                              >
+                                                <FileText size={18} />
+                                            </button>
+                                          )}
+                                          {report.assigned_to === adminUser?.id && report.status === 'RECOMMENDED' && (
+                                            <button 
+                                              onClick={() => setStatusModal({ isOpen: true, reportId: report.id, nextStatus: 'RESOLVED', notes: '' })}
+                                              className="p-2 bg-slate-50 rounded-xl text-slate-400 hover:bg-emerald-500 hover:text-white transition-all"
+                                              title="Selesaikan Kasus (SK Sanksi)"
+                                            >
+                                              <CheckCircle2 size={18} />
+                                            </button>
                                           )}
                                           {report.assigned_to === adminUser?.id && (
                                             <button 
@@ -1475,6 +1805,111 @@ export default function App() {
                     </>
                   )}
 
+                  {adminTab === 'reports' && statusModal.isOpen && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-white rounded-[40px] p-10 max-w-4xl mx-auto w-full shadow-2xl space-y-8 border border-slate-200"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-1">
+                          <button 
+                            onClick={() => setStatusModal({ isOpen: false, reportId: '', nextStatus: null })}
+                            className="flex items-center gap-2 text-slate-500 hover:text-unsri-black text-sm font-bold mb-4"
+                          >
+                            <ArrowLeft size={16} /> Kembali ke Daftar Laporan
+                          </button>
+                          <div className="flex items-center gap-2 text-unsri-gold">
+                            <Activity size={18} />
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em]">Status Management</span>
+                          </div>
+                          <h3 className="text-3xl font-black text-unsri-black tracking-tight">Update Progres Laporan</h3>
+                          <p className="text-sm font-medium text-slate-500 mt-2">Kode Laporan: <span className="font-bold text-slate-800">{reports.find(r => r.id === statusModal.reportId)?.tracking_code}</span></p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status Saat Ini</p>
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-slate-400" />
+                            <p className="text-lg font-bold text-slate-600">
+                              {reports.find(r => r.id === statusModal.reportId)?.status || 'PENDING'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="p-6 bg-unsri-gold/10 rounded-3xl border border-unsri-gold/20">
+                          <p className="text-[10px] font-black text-unsri-gold uppercase tracking-widest mb-1">Status Baru</p>
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-unsri-gold animate-pulse" />
+                            <p className="text-lg font-black text-unsri-black">{statusModal.nextStatus}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <form onSubmit={handleStatusUpdate} className="space-y-8">
+                        <div className="relative">
+                          <RichTextEditor 
+                            label="Catatan Internal Petugas (Wajib)" 
+                            value={statusModal.notes}
+                            onChange={(val) => setStatusModal({ ...statusModal, notes: val })}
+                            className={statusModal.nextStatus === 'INVESTIGATING' ? "min-h-[400px] pt-2 text-lg bg-blue-50 border-blue-200 focus:ring-blue-500/20" : "min-h-[250px] pt-2 text-lg bg-blue-50 border-blue-200 focus:ring-blue-500/20"}
+                          />
+                        </div>
+
+                        {statusModal.nextStatus === 'RECOMMENDED' && (
+                          <div className="space-y-6 p-8 bg-slate-50 border border-slate-200 rounded-[32px]">
+                            <h4 className="text-base font-black text-slate-800 uppercase tracking-widest mb-4">Hasil Investigasi</h4>
+                            <div className="grid grid-cols-2 gap-6">
+                              <Input label="Identitas Korban" name="identitas_korban" placeholder="Nama / NIM" required />
+                              <Input label="Identitas Saksi" name="identitas_saksi" placeholder="Nama / NIM Saksi (jika ada)" />
+                            </div>
+                            <div className="space-y-2">
+                               <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Ringkasan Kasus (Dokumen/PDF)</label>
+                               <input type="file" name="file_ringkasan_kasus" accept=".doc,.docx,application/pdf" className="w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-unsri-gold/10 file:text-unsri-black hover:file:bg-unsri-gold/20 leading-loose border border-slate-200 rounded-2xl p-2 bg-white" required />
+                            </div>
+                            <Input label="Tanggal Surat Rekomendasi Sanksi" name="tanggal_surat_rekomendasi" type="date" required />
+                            <div className="space-y-2">
+                               <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Upload Surat Rekomendasi Sanksi (Dokumen/PDF)</label>
+                               <input type="file" name="file_surat_rekomendasi" accept=".doc,.docx,application/pdf" className="w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-unsri-gold/10 file:text-unsri-black hover:file:bg-unsri-gold/20 leading-loose border border-slate-200 rounded-2xl p-2 bg-white" required />
+                            </div>
+                          </div>
+                        )}
+
+                        {statusModal.nextStatus === 'RESOLVED' && (
+                          <div className="space-y-6 p-8 bg-slate-50 border border-slate-200 rounded-[32px]">
+                            <h4 className="text-base font-black text-slate-800 uppercase tracking-widest mb-4">Penyelesaian Kasus</h4>
+                            <div className="grid grid-cols-2 gap-6">
+                              <Input label="Nomor SK Sanksi" name="nomor_sk_sanksi" placeholder="Nomor Surat Keputusan" required />
+                              <Input label="Tanggal Terbit SK Sanksi" name="tanggal_sk_sanksi" type="date" required />
+                            </div>
+                            <div className="space-y-2">
+                               <label className="text-xs font-black text-slate-400 uppercase tracking-widest ml-1">Upload SK Sanksi (Dokumen/PDF)</label>
+                               <input type="file" name="file_sk_sanksi" accept=".doc,.docx,application/pdf" className="w-full text-sm text-slate-500 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-unsri-gold/10 file:text-unsri-black hover:file:bg-unsri-gold/20 leading-loose border border-slate-200 rounded-2xl p-2 bg-white" required />
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-slate-100">
+                          <Button 
+                            variant="outline" 
+                            className="flex-1 order-2 sm:order-1 py-5" 
+                            type="button" 
+                            onClick={() => setStatusModal({ isOpen: false, reportId: '', nextStatus: null, notes: '' })}
+                          >
+                            Batalkan
+                          </Button>
+                          <Button 
+                            className="flex-[2] order-1 sm:order-2 py-5 text-lg" 
+                            type="submit"
+                          >
+                            Konfirmasi & Update Status
+                          </Button>
+                        </div>
+                      </form>
+                    </motion.div>
+                  )}
+
                   {adminTab === 'users' && (
                     <div className="space-y-8">
                       <div className="flex justify-between items-center">
@@ -1519,6 +1954,194 @@ export default function App() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {adminTab === 'settings_sla' && (
+                    <div className="space-y-8">
+                      <div>
+                        <h3 className="text-xl font-black text-unsri-black">Pengaturan SLA Sistem</h3>
+                        <p className="text-sm text-slate-500 font-medium">Batas maksimum waktu (hari kerja) untuk penyelesaian setiap fase pelaporan.</p>
+                      </div>
+
+                      <div className="bg-white p-10 rounded-[32px] border border-slate-200 shadow-sm">
+                        <form onSubmit={async (e) => {
+                          e.preventDefault();
+                          setIsLoading(true);
+                          const form = e.target as HTMLFormElement;
+                          const newSettings = {
+                            ...settings,
+                            sla_pending: parseInt((form.elements.namedItem('sla_pending') as HTMLInputElement).value),
+                            sla_investigating: parseInt((form.elements.namedItem('sla_investigating') as HTMLInputElement).value),
+                            sla_recommended: parseInt((form.elements.namedItem('sla_recommended') as HTMLInputElement).value),
+                            sla_resolved: parseInt((form.elements.namedItem('sla_resolved') as HTMLInputElement).value)
+                          };
+                          
+                          try {
+                            const res = await fetch('/api/admin/settings', {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(newSettings)
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              setSettings(data.settings);
+                              alert('Pengaturan SLA berhasil disimpan!');
+                            }
+                          } catch (err) {
+                            alert('Gagal menyimpan pengaturan SLA.');
+                          } finally {
+                            setIsLoading(false);
+                          }
+                        }} className="space-y-6 max-w-xl">
+                          <Input 
+                            label="Fase Verifikasi & Penugasan (Status: Menunggu)" 
+                            name="sla_pending" 
+                            type="number" 
+                            min={1} 
+                            defaultValue={settings.sla_pending} 
+                            helperText="Maksimum SLA Default: 7 hari kerja" 
+                            required 
+                          />
+                          <Input 
+                            label="Fase Investigasi (Status: Ditangani)" 
+                            name="sla_investigating" 
+                            type="number" 
+                            min={1} 
+                            defaultValue={settings.sla_investigating} 
+                            helperText="Maksimum SLA Default: 30 hari kerja" 
+                            required 
+                          />
+                          <Input 
+                            label="Fase Pemberian Rekomendasi" 
+                            name="sla_recommended" 
+                            type="number" 
+                            min={1} 
+                            defaultValue={settings.sla_recommended} 
+                            helperText="Maksimum SLA Default: 7 hari kerja" 
+                            required 
+                          />
+                          <Input 
+                            label="Fase Penyelesaian & Sanksi (Opsional)" 
+                            name="sla_resolved" 
+                            type="number" 
+                            min={1} 
+                            defaultValue={settings.sla_resolved} 
+                            helperText="Maksimum SLA Default: 7 hari kerja" 
+                            required 
+                          />
+
+                          <Button type="submit" className="w-full">
+                            Simpan Pengaturan SLA
+                          </Button>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
+                  {adminTab === 'settings_upload' && (
+                    <div className="space-y-8">
+                      <div>
+                        <h3 className="text-xl font-black text-unsri-black">Ukuran Maksimal Bukti</h3>
+                        <p className="text-sm text-slate-500 font-medium">Batas maksimum ukuran file (dalam megabyte) yang dapat diunggah oleh pelapor.</p>
+                      </div>
+
+                      <div className="bg-white p-10 rounded-[32px] border border-slate-200 shadow-sm">
+                        <form onSubmit={async (e) => {
+                          e.preventDefault();
+                          setIsLoading(true);
+                          const form = e.target as HTMLFormElement;
+                          const newSettings = {
+                            ...settings,
+                            max_upload_size_mb: parseInt((form.elements.namedItem('max_upload_size_mb') as HTMLInputElement).value)
+                          };
+                          
+                          try {
+                            const res = await fetch('/api/admin/settings', {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(newSettings)
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              setSettings(data.settings);
+                              alert('Pengaturan ukuran maksimal bukti berhasil disimpan!');
+                            }
+                          } catch (err) {
+                            alert('Gagal menyimpan pengaturan.');
+                          } finally {
+                            setIsLoading(false);
+                          }
+                        }} className="space-y-6 max-w-xl">
+                          <Input 
+                            label="Ukuran Maksimal Bukti (MB)" 
+                            name="max_upload_size_mb" 
+                            type="number" 
+                            min={1} 
+                            defaultValue={settings.max_upload_size_mb || 10} 
+                            helperText="Ukuran default: 10 MB. Pengaturan ini akan diaplikasikan di seluruh sistem." 
+                            required 
+                          />
+
+                          <Button type="submit" className="w-full">
+                            Simpan Pengukuran Bukti
+                          </Button>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
+                  {adminTab === 'settings_category' && (
+                    <div className="space-y-8">
+                      <div>
+                        <h3 className="text-xl font-black text-unsri-black">Kategori Kekerasan</h3>
+                        <p className="text-sm text-slate-500 font-medium">Atur daftar kategori kekerasan yang bisa dipilih pelapor dan satgas dalam sistem pelaporan.</p>
+                      </div>
+
+                      <div className="bg-white p-10 rounded-[32px] border border-slate-200 shadow-sm">
+                        <form onSubmit={async (e) => {
+                          e.preventDefault();
+                          setIsLoading(true);
+                          const form = e.target as HTMLFormElement;
+                          const newSettings = {
+                            ...settings,
+                            categories: (form.elements.namedItem('categories') as HTMLTextAreaElement).value.split('\n').map(c => c.trim()).filter(c => c.length > 0)
+                          };
+                          
+                          try {
+                            const res = await fetch('/api/admin/settings', {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(newSettings)
+                            });
+                            const data = await res.json();
+                            if (data.success) {
+                              setSettings(data.settings);
+                              alert('Daftar kategori berhasil diperbarui!');
+                            }
+                          } catch (err) {
+                            alert('Gagal menyimpan kategori.');
+                          } finally {
+                            setIsLoading(false);
+                          }
+                        }} className="space-y-6 max-w-xl">
+                          <div className="space-y-1.5 w-full">
+                            <label className="text-sm font-semibold text-gray-700 ml-1">Kategori Kekerasan (Pisahkan tiap kategori dengan baris baru "Enter")</label>
+                            <textarea 
+                              name="categories"
+                              defaultValue={(settings.categories || []).join('\n')}
+                              placeholder="Kekerasan Fisik&#10;Kekerasan Seksual..."
+                              className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 focus:bg-white focus:border-unsri-gold outline-none transition-all resize-none h-64 font-medium"
+                              required
+                            />
+                            <p className="text-xs text-slate-500 mt-2">Daftar kategori ini akan menjadi muara opsi dropdown pada form pelaporan halaman utama.</p>
+                          </div>
+
+                          <Button type="submit" className="w-full">
+                            Simpan Daftar Kategori
+                          </Button>
+                        </form>
                       </div>
                     </div>
                   )}
@@ -1670,86 +2293,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Status Update Modal */}
-      <AnimatePresence>
-        {statusModal.isOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="bg-white rounded-[40px] p-10 max-w-lg w-full shadow-2xl space-y-8 border border-slate-200"
-            >
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-unsri-gold">
-                    <Activity size={18} />
-                    <span className="text-[10px] font-black uppercase tracking-[0.3em]">Status Management</span>
-                  </div>
-                  <h3 className="text-2xl font-black text-unsri-black tracking-tight">Update Progres Laporan</h3>
-                </div>
-                <button 
-                  onClick={() => setStatusModal({ isOpen: false, reportId: '', nextStatus: null })}
-                  className="w-10 h-10 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-900 transition-all"
-                >
-                  <X size={20} />
-                </button>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-slate-50 rounded-3xl border border-slate-100">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status Saat Ini</p>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-slate-300" />
-                    <p className="text-sm font-bold text-slate-600">
-                      {reports.find(r => r.id === statusModal.reportId)?.status || 'PENDING'}
-                    </p>
-                  </div>
-                </div>
-                <div className="p-4 bg-unsri-gold/10 rounded-3xl border border-unsri-gold/20">
-                  <p className="text-[10px] font-black text-unsri-gold uppercase tracking-widest mb-1">Status Baru</p>
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-unsri-gold animate-pulse" />
-                    <p className="text-sm font-black text-unsri-black">{statusModal.nextStatus}</p>
-                  </div>
-                </div>
-              </div>
-
-              <form onSubmit={handleStatusUpdate} className="space-y-6">
-                <div className="relative">
-                  <TextArea 
-                    label="Catatan Internal Petugas" 
-                    name="status_notes" 
-                    placeholder="Berikan detail penanganan, hasil verifikasi, atau langkah selanjutnya..." 
-                    required 
-                    className="min-h-[160px] pt-12"
-                  />
-                  <div className="absolute left-5 top-[52px] flex items-center gap-2 text-slate-400 pointer-events-none">
-                    <FileText size={14} />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">Dokumentasi Penanganan</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <Button 
-                    variant="outline" 
-                    className="flex-1 order-2 sm:order-1" 
-                    type="button" 
-                    onClick={() => setStatusModal({ isOpen: false, reportId: '', nextStatus: null })}
-                  >
-                    Batalkan
-                  </Button>
-                  <Button 
-                    className="flex-[2] order-1 sm:order-2" 
-                    type="submit"
-                  >
-                    Konfirmasi & Update Status
-                  </Button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Assign Satgas Modal */}
       <AnimatePresence>

@@ -10,11 +10,15 @@
       // when libraries (like React 19 or whatwg-fetch) try to polyfill it.
       try {
         const desc = Object.getOwnPropertyDescriptor(window, 'fetch');
-        if (desc && !desc.writable && desc.configurable) {
+        if (desc && desc.configurable) {
+          const originalFetch = desc.get ? desc.get.bind(window) : desc.value;
           Object.defineProperty(window, 'fetch', {
-            value: window.fetch,
-            writable: true,
-            configurable: true
+            get: function() { return originalFetch; },
+            set: function(val) {
+              console.warn("Attempt to override window.fetch ignored.", val);
+            },
+            configurable: true,
+            enumerable: desc.enumerable
           });
         }
       } catch (e) {

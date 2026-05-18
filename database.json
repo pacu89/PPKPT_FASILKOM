@@ -1,0 +1,84 @@
+{
+  "reports": [
+    {
+      "id": "7e5092b8-209a-4625-ab37-40006a7a3198",
+      "tracking_code": "PPK-FBE3",
+      "reporter_name": null,
+      "reporter_contact": null,
+      "reporter_identity_number": null,
+      "is_anonymous": 1,
+      "victim_name": "U2FsdGVkX1+dvqyz0Io9rPt1ygwPdn7zCtES0b7OgBk=",
+      "category": "Kekerasan Psikis",
+      "incident_date": "2026-05-01",
+      "incident_location": "gedung kuliah d4.2",
+      "chronology": "kronologinya begitu",
+      "evidence_url": null,
+      "status": "INVESTIGATING",
+      "created_at": "2026-05-17T05:42:23.524Z",
+      "assigned_to": "f17273ce-0cae-4918-80a6-7fcea0e12c36"
+    },
+    {
+      "id": "3f0c2205-2395-410f-8154-8b8650a36b2c",
+      "tracking_code": "PPK-D4P4",
+      "reporter_name": "U2FsdGVkX1+8dChMDMXID/ChWinm8e9nMuPSZ0h4wzg=",
+      "reporter_contact": "U2FsdGVkX19p7iM9stO0MJwnQ6Dt4VJqGLO6N1Muy88=",
+      "reporter_identity_number": "U2FsdGVkX1+s4OuefbAhMgHXpxqb79jPUeL2Sy7lpTA=",
+      "is_anonymous": 0,
+      "victim_name": "U2FsdGVkX1+Cpyfk1eLJB9mF5oroZx/HLrm9IZY8zjI=",
+      "category": "Test",
+      "incident_date": "Test",
+      "incident_location": "Test",
+      "chronology": "Test",
+      "evidence_url": "evidence-1778998248019-7749e2fd-5bd6-4a00-85a0-6f808234d538.png",
+      "status": "PENDING",
+      "created_at": "2026-05-17T06:10:48.026Z",
+      "assigned_to": null
+    }
+  ],
+  "users": [
+    {
+      "id": "admin-default",
+      "username": "admin",
+      "password": "password",
+      "role": "admin"
+    },
+    {
+      "id": "f17273ce-0cae-4918-80a6-7fcea0e12c36",
+      "username": "putrieka",
+      "password": "satgas12345",
+      "role": "satgas"
+    }
+  ],
+  "audit_logs": [
+    {
+      "id": "e335a6bf-8207-4350-9b9b-0bb5ca4e6873",
+      "report_id": "7e5092b8-209a-4625-ab37-40006a7a3198",
+      "user_id_satgas": "admin-default",
+      "action": "ASSIGN_SATGAS",
+      "previous_status": "PENDING",
+      "new_status": "PENDING",
+      "catatan_petugas": "Admin menugaskan satgas",
+      "created_at": "2026-05-17T05:43:23.669Z"
+    },
+    {
+      "id": "8be1460d-bd15-4b50-906f-4331e196293e",
+      "report_id": "7e5092b8-209a-4625-ab37-40006a7a3198",
+      "user_id_satgas": "f17273ce-0cae-4918-80a6-7fcea0e12c36",
+      "action": "EXPORT_ZIP",
+      "previous_status": "PENDING",
+      "new_status": "PENDING",
+      "catatan_petugas": "Laporan diekspor sebagai ZIP terenkripsi. Password: ${zipPassword}",
+      "created_at": "2026-05-17T05:43:52.239Z"
+    },
+    {
+      "id": "9867fe25-465a-4713-8a6c-2bec882b475d",
+      "report_id": "7e5092b8-209a-4625-ab37-40006a7a3198",
+      "user_id_satgas": "f17273ce-0cae-4918-80a6-7fcea0e12c36",
+      "action": "UPDATE_STATUS",
+      "previous_status": "PENDING",
+      "new_status": "INVESTIGATING",
+      "catatan_petugas": "proses dilanjutkan",
+      "created_at": "2026-05-17T05:56:37.479Z"
+    }
+  ]
+}
