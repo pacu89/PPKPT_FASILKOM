@@ -197,7 +197,7 @@ const Select = ({ label, options, error, ...props }: React.SelectHTMLAttributes<
   </div>
 );
 
-const RichTextEditor = ({ label, value, onChange, error, className }: { label: string; value: string; onChange: (val: string) => void; error?: string; className?: string }) => (
+const RichTextEditor = ({ label, value, onChange, error, className, placeholder }: { label: string; value: string; onChange: (val: string) => void; error?: string; className?: string; placeholder?: string }) => (
   <div className="space-y-2 w-full">
     <div className="flex items-center justify-between px-1">
       <label className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
@@ -209,7 +209,7 @@ const RichTextEditor = ({ label, value, onChange, error, className }: { label: s
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full min-h-[200px] p-6 bg-transparent outline-none resize-y text-sm font-medium"
-        placeholder="Tuliskan catatan di sini..."
+        placeholder={placeholder || "Tuliskan catatan di sini..."}
       />
     </div>
     {error && <p className="text-xs text-red-500 font-bold ml-1">{error}</p>}
@@ -357,7 +357,7 @@ export default function App() {
   const [adminUser, setAdminUser] = useState<any>(null);
   const [reports, setReports] = useState<Report[]>([]);
   const [users, setUsers] = useState<UserData[]>([]);
-  const [settings, setSettings] = useState({ sla_pending: 7, sla_investigating: 30, sla_recommended: 7, sla_resolved: 7 });
+  const [settings, setSettings] = useState<any>({ sla_pending: 7, sla_investigating: 30, sla_recommended: 7, sla_resolved: 7, max_upload_size_mb: 10 });
   const [adminTab, setAdminTab] = useState<AdminTab>('reports');
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -405,6 +405,20 @@ export default function App() {
 
   const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (formData.evidence) {
+      const validTypes = ['image/jpeg', 'image/png', 'application/pdf', 'video/mp4'];
+      if (!validTypes.includes(formData.evidence.type)) {
+        setMessage({ type: 'error', text: 'Tipe file bukti tidak didukung. Harap unggah format JPG, PNG, PDF, atau MP4.' });
+        return;
+      }
+      const maxMb = settings?.max_upload_size_mb || 10;
+      if (formData.evidence.size > maxMb * 1024 * 1024) {
+        setMessage({ type: 'error', text: `Ukuran file bukti terlalu besar. Maksimal adalah ${maxMb}MB.` });
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       const data = new FormData();
@@ -611,6 +625,24 @@ export default function App() {
     if (!statusModal.nextStatus) return;
 
     const formData = new FormData(form);
+    
+    const maxMb = settings?.max_upload_size_mb || 10;
+    const maxSize = maxMb * 1024 * 1024;
+    const validDocs = ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/pdf'];
+
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File && value.size > 0) {
+        if (!validDocs.includes(value.type)) {
+          alert(`File yang diunggah harus berformat DOC, DOCX, atau PDF.`);
+          return;
+        }
+        if (value.size > maxSize) {
+          alert(`Ukuran file "${value.name}" terlalu besar (${(value.size/1024/1024).toFixed(1)}MB). Maksimal adalah ${maxMb}MB.`);
+          return;
+        }
+      }
+    }
+
     formData.append('status', statusModal.nextStatus);
     formData.append('user_id_satgas', adminUser.id);
     formData.append('catatan_petugas', statusModal.notes);
@@ -783,7 +815,7 @@ export default function App() {
                       transition={{ delay: 0.2 }}
                       className="inline-flex items-center gap-2 px-4 py-2 bg-unsri-gold/10 border border-unsri-gold/20 rounded-full text-unsri-black text-xs font-bold uppercase tracking-widest"
                     >
-                      <Shield size={14} className="text-unsri-black" />
+                      <img src="/unsri_icon.png" alt="UNSRI" className="w-3.5 h-3.5 object-contain" />
                       <span>Satgas PPKPT Fasilkom UNSRI</span>
                     </motion.div>
 
@@ -907,8 +939,8 @@ export default function App() {
               <div className="py-24 px-4 text-center">
                 <div className="max-w-3xl mx-auto space-y-12">
                   <div className="flex justify-center gap-6 opacity-30">
-                    <div className="flex items-center gap-2 font-black text-2xl text-slate-400">
-                      <Shield size={32} /> PPKPT
+                    <div className="flex items-center gap-2 font-black text-2xl text-slate-400 opacity-80">
+                      <img src="/unsri_icon.png" alt="UNSRI" className="w-8 h-8 object-contain grayscale" /> PPKPT
                     </div>
                   </div>
                   <p className="text-2xl font-medium text-slate-400 italic leading-relaxed">
@@ -1088,11 +1120,25 @@ export default function App() {
                     <div className="sm:col-span-2">
                       <FileInput 
                         label="Unggah Bukti (Opsional)" 
-                        helperText={formData.evidence ? `File terpilih: ${formData.evidence.name}` : "Format: JPG, PNG, PDF, atau MP4 (Maks. 10MB)"}
+                        accept="image/jpeg,image/png,application/pdf,video/mp4"
+                        helperText={formData.evidence ? `File terpilih: ${formData.evidence.name}` : `Format: JPG, PNG, PDF, atau MP4 (Maks. ${settings?.max_upload_size_mb || 10}MB)`}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
+                            const validTypes = ['image/jpeg', 'image/png', 'application/pdf', 'video/mp4'];
+                            if (!validTypes.includes(file.type)) {
+                              setMessage({ type: 'error', text: 'Tipe file tidak didukung. Harap unggah format JPG, PNG, PDF, atau MP4.' });
+                              e.target.value = '';
+                              return;
+                            }
+                            const maxMb = settings?.max_upload_size_mb || 10;
+                            if (file.size > maxMb * 1024 * 1024) {
+                              setMessage({ type: 'error', text: `Ukuran file terlalu besar. Maksimal adalah ${maxMb}MB.` });
+                              e.target.value = '';
+                              return;
+                            }
                             setFormData({...formData, evidence: file});
+                            setMessage(null);
                           }
                         }}
                       />
@@ -1303,8 +1349,8 @@ export default function App() {
                 <div className="absolute top-0 right-0 w-32 h-32 bg-circuit -mr-16 -mt-16 rotate-45 opacity-10" />
 
                 <div className="text-center space-y-4">
-                  <div className="w-20 h-20 bg-unsri-navy rounded-3xl flex items-center justify-center text-unsri-gold mx-auto shadow-2xl mb-6 rotate-3">
-                    <Lock size={40} />
+                  <div className="w-20 h-20 bg-transparent flex items-center justify-center mx-auto mb-6">
+                    <img src="/unsri_icon.png" alt="UNSRI" className="w-full h-full object-contain" />
                   </div>
                   <h2 className="text-3xl font-black text-unsri-black tracking-tight">Portal Satgas</h2>
                   <p className="text-sm text-slate-500 font-medium">Sistem Manajemen Kasus PPKPT Fasilkom UNSRI</p>
@@ -1349,8 +1395,8 @@ export default function App() {
               <aside className="w-72 bg-unsri-navy text-white flex flex-col shadow-2xl relative z-10">
                 <div className="p-8 border-b border-white/10">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-unsri-gold rounded-xl flex items-center justify-center shadow-lg shadow-unsri-gold/20">
-                      <Shield size={24} className="text-unsri-black" />
+                    <div className="w-12 h-12">
+                      <img src="/unsri_icon.png" alt="Logo UNSRI" className="w-full h-full object-contain" />
                     </div>
                     <div>
                       <h1 className="font-black text-lg leading-tight tracking-tighter">SATGAS <span className="text-unsri-gold">PPKPT</span></h1>
@@ -1552,36 +1598,41 @@ export default function App() {
                         <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-sm hover:shadow-xl transition-all">
                           <h4 className="text-sm font-black text-unsri-black mb-4 tracking-tighter">Status Penanganan</h4>
                           <div className="h-[220px] w-full flex items-center justify-center">
-                            <PieChart width={250} height={220}>
-                              <Pie
-                                data={[
-                                  { name: 'Menunggu', value: reports.filter(r => r.status === 'PENDING').length, color: '#f59e0b' },
-                                  { name: 'Ditangani', value: reports.filter(r => r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED').length, color: '#3b82f6' },
-                                  { name: 'Selesai', value: reports.filter(r => r.status === 'RESOLVED').length, color: '#10b981' }
-                                ].filter(d => d.value > 0)}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={40}
-                                outerRadius={80}
-                                paddingAngle={5}
-                                dataKey="value"
-                                label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
-                                labelLine={false}
-                                fill="#8884d8"
-                              >
-                                {
-                                  [
-                                    { name: 'Menunggu', value: reports.filter(r => r.status === 'PENDING').length, color: '#f59e0b' },
-                                    { name: 'Ditangani', value: reports.filter(r => r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED').length, color: '#3b82f6' },
-                                    { name: 'Selesai', value: reports.filter(r => r.status === 'RESOLVED').length, color: '#10b981' }
-                                  ].filter(d => d.value > 0).map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                  ))
-                                }
-                              </Pie>
-                              <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                              <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
-                            </PieChart>
+                            {(() => {
+                              const diprosesCount = reports.filter(r => r.status === 'INVESTIGATING' || r.status === 'RECOMMENDED' || r.status === 'RESOLVED').length;
+                              const belumDiprosesCount = reports.filter(r => r.status === 'PENDING').length;
+                              const totalCount = diprosesCount + belumDiprosesCount;
+                              const diprosesPercent = totalCount > 0 ? Math.round((diprosesCount / totalCount) * 100) : 0;
+                              const belumDiprosesPercent = totalCount > 0 ? (100 - diprosesPercent) : 0;
+                              const pieData = [
+                                { name: `Diproses (${diprosesPercent}%)`, value: diprosesCount, color: '#10b981' },
+                                { name: `Belum Diproses (${belumDiprosesPercent}%)`, value: belumDiprosesCount, color: '#800000' }
+                              ].filter(d => d.value > 0);
+                              
+                              return (
+                                <PieChart width={250} height={220}>
+                                  <Pie
+                                    data={pieData}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={50}
+                                    outerRadius={80}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                    labelLine={false}
+                                    fill="#8884d8"
+                                  >
+                                    {
+                                      pieData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                      ))
+                                    }
+                                  </Pie>
+                                  <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                                  <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 'bold', color: '#1A1A1A' }} />
+                                </PieChart>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -1853,6 +1904,7 @@ export default function App() {
                             label="Catatan Internal Petugas (Wajib)" 
                             value={statusModal.notes}
                             onChange={(val) => setStatusModal({ ...statusModal, notes: val })}
+                            placeholder={statusModal.nextStatus === 'INVESTIGATING' ? "Contoh: Tim satgas akan melakukan pemanggilan tertutup kepada pelapor pada [Tanggal] untuk menggali kronologi lebih detail. Harap berkoordinasi dengan pendamping psikologi..." : "Tuliskan catatan internal terkait update status ini..."}
                             className={statusModal.nextStatus === 'INVESTIGATING' ? "min-h-[400px] pt-2 text-lg bg-blue-50 border-blue-200 focus:ring-blue-500/20" : "min-h-[250px] pt-2 text-lg bg-blue-50 border-blue-200 focus:ring-blue-500/20"}
                           />
                         </div>
