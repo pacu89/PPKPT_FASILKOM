@@ -1,0 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-unsri-gold: #FFCC00;
+  --color-unsri-black: #1A1A1A;
+  --color-unsri-navy: #0A192F;
+}
+
+@layer base {
+  body {
+    @apply antialiased bg-slate-50 text-slate-900;
+  }
+}
+
+@layer utilities {
+  .bg-circuit {
+    background-image: radial-gradient(#FFCC00 0.5px, transparent 0.5px);
+    background-size: 24px 24px;
+    opacity: 0.05;
+  }
+  
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20 shadow-xl;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+}
